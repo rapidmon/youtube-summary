@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
     } else {
       // 영상 직접 분석
       result = await model.generateContent([
-        { fileData: { fileUri: url } },
+        { fileData: { fileUri: url, mimeType: 'video/*', } },
         { text: SUMMARY_PROMPT },
       ]);
     }
