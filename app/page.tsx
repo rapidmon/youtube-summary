@@ -40,9 +40,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-3xl mx-auto">
-        <h1 className="text-4xl font-bold text-center mb-8">
-          🎬 YouTube 영상 요약
-        </h1>
+        <h1 className="text-4xl font-bold text-center mb-8">YouTube 영상 요약</h1>
 
         <form onSubmit={handleSubmit} className="mb-8">
           <div className="flex gap-4">

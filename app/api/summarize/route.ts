@@ -1,5 +1,4 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { YoutubeTranscript } from 'youtube-transcript';
 import { NextRequest, NextResponse } from 'next/server';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -18,8 +17,7 @@ const SUMMARY_PROMPT = `
 요약 방식:
 1. 영상의 전체 흐름을 3~7개 정도의 bullet point로 정리한다. time stamp와 함께 제공한다.
 2. 중요한 개념, 숫자, 주장, 결론을 명확하게 적는다.
-3. 교육·연구 목적에 맞게, 지나치게 가벼운 표현보다는
-   이해하기 쉬운 설명 위주로 쓴다.
+3. 교육·연구 목적에 맞게, 지나치게 가벼운 표현보다는 이해하기 쉬운 설명 위주로 쓴다.
 
 [영상 유형별 추가 정리]
 - 강의/교육: 개념 정의 + 예시 포함
@@ -64,17 +62,6 @@ bullet point 2
 </rules>
 `;
 
-// 자막 가져오기 시도
-async function tryGetTranscript(url: string) {
-  try {
-    const transcripts = await YoutubeTranscript.fetchTranscript(url);
-    const text = transcripts.map((t) => t.text).join(' ');
-    return text.length > 100 ? { success: true, text } : { success: false, text: '' };
-  } catch {
-    return { success: false, text: '' };
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     const { url } = await request.json();
@@ -83,30 +70,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'URL이 필요합니다' }, { status: 400 });
     }
 
-    // 1. 자막 시도
-    const transcript = await tryGetTranscript(url);
-
-    let result;
-
-    if (transcript.success) {
-      // 자막 기반 요약
-      result = await model.generateContent(
-        `${SUMMARY_PROMPT}\n\n<transcript>\n${transcript.text}\n</transcript>`
-      );
-    } else {
-      // 영상 직접 분석
-      result = await model.generateContent([
-        { fileData: { fileUri: url, mimeType: 'video/*', } },
-        { text: SUMMARY_PROMPT },
-      ]);
-    }
+    const result = await model.generateContent([
+      { fileData: { fileUri: url, mimeType: 'video/*', } },
+      { text: SUMMARY_PROMPT },
+    ]);
 
     const summary = result.response.text();
 
     return NextResponse.json({
       success: true,
       summary,
-      method: transcript.success ? 'transcript' : 'video',
+      method: 'video',
     });
   } catch (error) {
     console.error('Error:', error);
