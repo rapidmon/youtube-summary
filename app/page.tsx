@@ -26,7 +26,7 @@ export default function Home() {
 
       if (data.success) {
         setSummary(data.summary);
-        setMethod(data.method === 'transcript' ? '📝 자막 기반' : '🎬 영상 분석');
+        setMethod(data.method = '영상 분석');
       } else {
         setError(data.error || '요약에 실패했습니다');
       }

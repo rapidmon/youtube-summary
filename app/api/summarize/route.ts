@@ -1,16 +1,16 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { Innertube } from 'youtubei.js';
 import { NextRequest, NextResponse } from 'next/server';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
 const SUMMARY_PROMPT = `
 <system>
-너는 유튜브 학습 도우미야. 영상 유형을 자동으로 파악해서 최적의 형태로 정리해.
+너는 유튜브 학습 도우미야. 내가 주는 자막들로 영상을 파악해서 최적의 형태로 정리해.
 
 역할:
-- 사용자가 유튜브나 기타 플랫폼의 영상 링크를 붙여넣으면,
-  가능한 경우 영상의 자막/대사를 기반으로 핵심 내용을 요약해서 제공한다.
+- 자막/대사를 기반으로 핵심 내용을 요약해서 제공한다.
 - 사용자가 한국어로 말하면 한국어로, 다른 언어로 말하면 그 언어로 답한다
   (멀티 언어 지원).
 
@@ -44,7 +44,7 @@ bullet point 2
 - 
 
 알아두면 좋은 용어 (최대 3개)
-- **용어**: 뜻
+- 용어: 뜻
 (없으면 생략)
 
 이 영상의 포인트
@@ -58,6 +58,69 @@ bullet point 2
 </rules>
 `;
 
+async function getTranscript(url: string) {
+  try {
+    const videoId = url.match(/(?:v=|\/)([a-zA-Z0-9_-]{11})/)?.[1];
+    
+    if (!videoId) {
+      return { success: false, text: '', error: 'Invalid YouTube URL' };
+    }
+
+    const yt = await Innertube.create();
+    
+    // 방법 1: getTranscript 직접 시도
+    try {
+      const info = await yt.getInfo(videoId);
+      const transcriptData = await info.getTranscript();
+      
+      const segments = transcriptData?.transcript?.content?.body?.initial_segments || [];
+      const text = segments
+        .map((seg: any) => seg?.snippet?.text || '')
+        .join(' ')
+        .trim();
+
+      if (text && text.length >= 10) {
+        return { success: true, text };
+      }
+    } catch (e) {
+      console.log('방법 1 실패, 방법 2 시도...');
+    }
+
+    // 방법 2: captions에서 가져오기
+    try {
+      const info = await yt.getBasicInfo(videoId);
+      const captions = info.captions?.caption_tracks;
+      
+      if (captions && captions.length > 0) {
+        const captionUrl = captions[0].base_url;
+        const response = await fetch(captionUrl);
+        const xml = await response.text();
+        
+        // XML에서 텍스트 추출
+        const textMatches = xml.match(/<text[^>]*>([^<]*)<\/text>/g) || [];
+        const text = textMatches
+          .map(t => t.replace(/<[^>]+>/g, '').trim())
+          .join(' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&#39;/g, "'")
+          .replace(/&quot;/g, '"');
+
+        if (text && text.length >= 10) {
+          return { success: true, text };
+        }
+      }
+    } catch (e) {
+      console.log('방법 2도 실패:', e);
+    }
+
+    return { success: false, text: '', error: '자막을 가져올 수 없습니다' };
+  } catch (error) {
+    return { success: false, text: '', error: String(error) };
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { url } = await request.json();
@@ -66,18 +129,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'URL이 필요합니다' }, { status: 400 });
     }
 
-    const result = await model.generateContent([
-      { fileData: { fileUri: url, mimeType: 'video/*', } },
-      { text: SUMMARY_PROMPT },
-    ]);
+    // 1. 자막 가져오기
+    const transcript = await getTranscript(url);
+
+    if (!transcript.success) {
+      return NextResponse.json({ 
+        success: false, 
+        error: transcript.error || '자막을 가져올 수 없습니다' 
+      }, { status: 400 });
+    }
+
+    // 2. Gemini로 요약
+    const result = await model.generateContent(
+      `${SUMMARY_PROMPT}\n\n<transcript>\n${transcript.text}\n</transcript>`
+    );
 
     const summary = result.response.text();
 
     return NextResponse.json({
       success: true,
       summary,
-      method: 'video',
     });
+
   } catch (error) {
     console.error('Error:', error);
     return NextResponse.json(
